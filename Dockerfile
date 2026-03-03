@@ -31,15 +31,53 @@
 # - No health check
 # - No multi-stage build
 
-FROM python:3.11
+#===================================================
+#Stage 1: Builder
+#===================================================
+#start from Python base image
+FROM python:3.11-slim  AS builder
+
+#set working directory
+WORKDIR /app
+
+#install dependencies specific location
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install --no-compile -r requirements.txt 
+
+#=========================================================
+#stage 2: Final
+#=========================================================
+FROM python:3.11-slim
+
+#Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+#Copy installed packages from builder
+COPY --from=builder /install /usr/local
 
-COPY src/ ./src/
+#Copy application code
+COPY --chown=appuser:appuser src/ ./src/
 
+#Set environment variables
+ENV FLASK_APP=src/app.py
+ENV FLASK_RUN_HOST=0.0.0.0
+ENV FLASK_RUN_PORT=5000
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+#Switch to non-root user
+USER appuser
+
+#Document the port
 EXPOSE 5000
 
+#Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" || exit 1
+
+#Run the application
 CMD ["python", "src/app.py"]
+
+
